@@ -292,6 +292,82 @@ Then reply with ONE `<notes>` block and nothing else: for each change, the momen
 trajectory that motivated it. The notes are read by a person, not applied by a machine."""
 
 
+_SURFACE_PI = """\
+# WHAT YOU CAN CHANGE
+
+The harness is a tree of components. Each has a different runtime cost and a different reach:
+
+| path | what it is | when it is in context |
+|---|---|---|
+| `systemprompt.md` | role and procedure | ALWAYS ON -- appended to the agent's own system prompt; every token competes with the agent's own output budget |
+| `guardrails.md` | standing rules | ALWAYS ON -- same cost |
+| `LongTermMEMORY.md` | durable domain facts | ALWAYS ON -- same cost |
+| `tool_descriptions/tool_guidance.md` | how to use the tools | ALWAYS ON -- same cost |
+| `skills/<name>/SKILL.md` | a reusable workflow | name+description advertised; the BODY is read ON DEMAND |
+| `skills/<name>/scripts/<file>` | a helper carried with its skill | run via bash |
+| `scripts/<name>.py` | a deterministic helper | run on demand via bash |
+
+The agent's tools are read, write, edit and bash. It has no subagents and no in-loop hooks, so
+`sub_agents/` and `plugin/` files are off the surface and dropped.
+
+The one that is easy to get wrong:
+
+`skills/` -- frontmatter needs `name:` matching the directory and a `description:`, or it is
+dropped silently at load. Two further rules below decide whether it survives validation at all:
+it must be named in the always-on text, and any helper it calls must travel with it.
+
+Change only what a trajectory shows needs changing -- but WHERE you change something, the FORM
+matters as much as the content, and the cheap form is not the obvious one.
+
+ALWAYS-ON PROSE IS THE EXPENSIVE OPTION. Every word of it is in context on every run, competing
+with the agent's own output budget. An on-demand component costs nothing until the moment it is
+invoked.
+
+So prefer, in this order:
+  - a SKILL for anything with a recognisable trigger -- a procedure for a kind of change, a
+    recurring situation in a codebase. This is the default form for new instruction.
+  - a SCRIPT for a deterministic operation the runs hand-rolled and got wrong, or did slowly.
+  - ALWAYS-ON TEXT last, and only for a short rule that genuinely applies to every run. If you
+    add always-on text, cut something else to pay for it.
+
+TWO RULES THAT DISCARD THE WHOLE PROPOSAL. Validation runs before any rollout, and a harness
+that fails it is thrown away entire.
+
+1. EVERY SKILL NEEDS A TRIGGER LINE -- the most violated rule here by a wide margin. If you
+   create or keep `skills/<name>/SKILL.md`, its directory name must appear VERBATIM in
+   `systemprompt.md` or `guardrails.md`, in the SAME edit:
+
+       When <the situation this skill handles>, read the `<name>` skill.
+
+2. EVERY SCRIPT YOU NAME MUST EXIST. A `scripts/<file>.py` invoked from a SKILL.md or from
+   always-on text must ship in the same proposal, a skill's own helper at
+   `skills/<skill-name>/scripts/<file>.py`; one dropped loose in the skill directory is OFF THE
+   EDITABLE SURFACE and silently discarded. Helpers are installed OUTSIDE the repository and the
+   agent is told where they live, so never tell it to create or copy them into the repository.
+
+THE DELIVERABLE'S SHAPE BELONGS TO THE REQUEST, NOT TO YOU. The deliverable is the change the
+agent leaves in the repository. A harness changes HOW the agent works; it must never change WHAT
+it delivers. Every file the agent leaves behind is part of that change: never tell it to write
+notes, logs, plans or scratch files into the repository, to add files the request did not ask
+for, or to widen the change beyond what the request needs.
+
+# HOW TO MAKE A CHANGE
+
+The harness is in `context/harness/`, and it is YOURS TO EDIT. Open the files, change them in
+place with your normal tools, and create new ones where a new component is the right lever.
+Your edits on disk ARE the proposal -- there is no separate format to reproduce them in, and
+nothing you write in this reply changes the harness.
+
+- Files you do not touch are inherited unchanged. Do not rewrite a file to keep it the same.
+- Delete a file to remove that component.
+- If the evidence does not argue for any change, leave everything as it is and say KEEP_BASE
+  in your notes. That is a real answer, not a failure: adaptation the evidence does not support
+  costs context and buys nothing.
+
+Then reply with ONE `<notes>` block and nothing else: for each change, the moment in a
+trajectory that motivated it. The notes are read by a person, not applied by a machine."""
+
+
 GENERALIZE = """\
 # GROUND IT IN THIS WORKSPACE, SHAPE IT FOR THE {DOMAIN_WORD_UPPER}
 
@@ -513,6 +589,32 @@ Hard rules, each one learned from a previous failure:
   surface."""
 
 
+_TTS_SURFACE_HEAD_PI = """\
+# EDITABLE HARNESS SURFACE
+
+You may write ONLY these paths. Anything else is off the editable surface: it is dropped before
+your work is used, however good it is.
+
+| path | component | when it is in context |
+|---|---|---|
+| `systemprompt.md` | c1 persona/procedure | ALWAYS ON -- every token competes with the output budget |
+| `guardrails.md` | c6 always-on rules | ALWAYS ON -- same cost |
+| `LongTermMEMORY.md` | c3 durable domain facts | ALWAYS ON -- same cost |
+| `tool_descriptions/tool_guidance.md` | c4 tool prose | ALWAYS ON -- same cost |
+| `skills/<name>/SKILL.md` | c6 reusable workflow | name+description advertised; the BODY is read ON DEMAND |
+| `skills/<name>/scripts/<file>` | helper carried with its skill | run via bash |
+| `scripts/<name>.py` | c7 deterministic helper | run ON DEMAND via bash |
+
+This agent has no subagents and no in-loop hooks: never write `sub_agents/` or `plugin/` files.
+
+Hard rules, each one learned from a previous failure:
+- Always-on prose competes with the agent's own budget. Prefer an on-demand skill over new
+  always-on prose; if you add always-on text, cut something else.
+- `scripts/*.py` filenames must be snake_case and must compile under py_compile.
+- Never write `AGENTS.md` or `prompt.md`: the runtime produces those, and they are not on the
+  editable surface."""
+
+
 _TTS_INV = """\
 # YOUR DIMENSION: INVARIANT -- how the agent works, independent of the subject
 
@@ -629,7 +731,27 @@ def _build_surface_texts() -> dict[str, _SurfaceText]:
             _surface_part(_SURFACE_CODEX, "# HOW TO MAKE A CHANGE"),
         ]
     )
+    pi_tts = "\n\n".join(
+        [
+            _TTS_SURFACE_HEAD_PI,
+            _surface_part(_SURFACE_PI, "TWO RULES THAT DISCARD", "THE DELIVERABLE'S SHAPE"),
+            _surface_part(_SURFACE_PI, "# HOW TO MAKE A CHANGE"),
+        ]
+    )
     return {
+        "pi": _SurfaceText(
+            surface_md=_SURFACE_PI,
+            inv=_INV_TEMPLATE.replace(
+                "__LOOP_LEVER__",
+                "`scripts/<name>.py` check the agent is told to run before it finishes",
+            ),
+            dom=_DOM_TEMPLATE.replace(
+                "__TRIGGER_SENTENCE__",
+                "A skill exists only once its name appears in the always-on text: write that "
+                "trigger line in the same edit.",
+            ),
+            tts_surface=pi_tts,
+        ),
         "opencode": _SurfaceText(
             surface_md=_SURFACE_OPENCODE,
             inv=_INV_TEMPLATE.replace(
